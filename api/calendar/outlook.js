@@ -101,7 +101,11 @@ export default async function handler(req, res) {
       if (baseEvent.start) {
         if (baseEvent.isRecurring && baseEvent.rrule) {
           // Expand recurring event into individual instances
-          console.log(`Expanding recurring event: "${baseEvent.summary}" (UID: ${uid})`);
+          console.log(`\n=== DEBUGGING RECURRING EVENT ===`);
+          console.log(`Event: "${baseEvent.summary}" (UID: ${uid})`);
+          console.log(`Start: ${baseEvent.start?.toISOString()}`);
+          console.log(`RRULE: ${baseEvent.rrule}`);
+          console.log(`Exception dates: ${baseEvent.exdates?.length || 0}`);
           
           // Get exception dates and modified instances for this UID
           const exceptionDates = baseEvent.exdates || [];
@@ -116,6 +120,17 @@ export default async function handler(req, res) {
           );
           
           console.log(`Generated ${recurringInstances.length} instances for "${baseEvent.summary}" after applying exceptions`);
+          console.log(`Date range: ${sixMonthsAgo.toISOString()} to ${sixMonthsFromNow.toISOString()}`);
+          
+          if (baseEvent.summary && baseEvent.summary.toLowerCase().includes('travel')) {
+            console.log(`\n🚗 TRAVEL EVENT DETAILED DEBUG:`);
+            console.log(`  Title: ${baseEvent.summary}`);
+            console.log(`  Start date: ${baseEvent.start}`);
+            console.log(`  RRULE parsed:`, parseRRule(baseEvent.rrule));
+            console.log(`  Instances generated: ${recurringInstances.length}`);
+            console.log(`  First few instances:`, recurringInstances.slice(0, 5).map(i => i.start));
+          }
+          
           events.push(...recurringInstances);
         } else {
           // Single event - check if it's in our date range
