@@ -127,13 +127,27 @@ function parseEvent(eventContent) {
     line = line.trim();
     if (!line || !line.includes(':')) continue;
     
+    // Handle multiline properties (lines that start with space or tab)
+    while (lines.indexOf(line) + 1 < lines.length && 
+           /^\s/.test(lines[lines.indexOf(line) + 1])) {
+      const nextLineIndex = lines.indexOf(line) + 1;
+      line += lines[nextLineIndex].trim();
+      lines.splice(nextLineIndex, 1);
+    }
+    
     const colonIndex = line.indexOf(':');
     const property = line.substring(0, colonIndex);
     const value = line.substring(colonIndex + 1);
     
+    console.log('Parsing property:', property, 'Value:', value);
+    
     if (property.startsWith('DTSTART')) {
+      console.log('Found DTSTART:', property, value);
       event.start = parseDate(value);
+      event.dtstart = value; // Keep original for debugging
+      event.dtstartProperty = property; // Keep property for debugging
     } else if (property.startsWith('DTEND')) {
+      console.log('Found DTEND:', property, value);
       event.end = parseDate(value);
     } else if (property === 'SUMMARY') {
       event.summary = cleanText(value);
@@ -176,6 +190,13 @@ function parseEvent(eventContent) {
     }
   }
   
+  console.log('Parsed event:', {
+    summary: event.summary,
+    start: event.start,
+    dtstart: event.dtstart,
+    dtstartProperty: event.dtstartProperty
+  });
+  
   return event;
 }
 
@@ -183,13 +204,52 @@ function parseDate(dateString) {
   if (!dateString) return null;
   
   try {
-    // Handle timezone information in the property line
-    let cleanDate = dateString;
+    console.log('Parsing date:', dateString);
     
-    // Remove any timezone info that might be appended
-    cleanDate = cleanDate.replace(/[TZ]/g, '').replace(/\+.*$/, '').replace(/-.*$/, '');
+    // Handle different ICS date formats
+    let cleanDate = dateString.trim();
     
-    if (cleanDate.length >= 14) {
+    // Remove any timezone identifiers that might be in the property line
+    // Example: DTSTART;TZID=Australia/Sydney:20250607T140000
+    if (cleanDate.includes(';')) {
+      cleanDate = cleanDate.split(':').pop();
+    }
+    
+    // Remove timezone suffixes like +1000, -0500, Z
+    cleanDate = cleanDate.replace(/[+-]\d{4}$/, '').replace(/Z$/, '');
+    
+    console.log('Cleaned date string:', cleanDate);
+    
+    if (cleanDate.length === 8) {
+      // All-day event format: YYYYMMDD (e.g., 20250607)
+      const year = cleanDate.substring(0, 4);
+      const month = cleanDate.substring(4, 6);
+      const day = cleanDate.substring(6, 8);
+      
+      const result = new Date(`${year}-${month}-${day}T09:00:00Z`);
+      console.log('All-day event parsed as:', result);
+      return result;
+      
+    } else if (cleanDate.length >= 14 && cleanDate.includes('T')) {
+      // Timed event format: YYYYMMDDTHHMMSS (e.g., 20250607T140000)
+      const datePart = cleanDate.substring(0, 8);
+      const timePart = cleanDate.substring(9);
+      
+      const year = datePart.substring(0, 4);
+      const month = datePart.substring(4, 6);
+      const day = datePart.substring(6, 8);
+      
+      const hour = timePart.substring(0, 2);
+      const minute = timePart.substring(2, 4);
+      const second = timePart.substring(4, 2) || '00';
+      
+      const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
+      const result = new Date(dateStr);
+      console.log('Timed event parsed as:', result);
+      return result;
+      
+    } else if (cleanDate.length >= 14) {
+      // Handle format without T separator: YYYYMMDDHHMMSS
       const year = cleanDate.substring(0, 4);
       const month = cleanDate.substring(4, 6);
       const day = cleanDate.substring(6, 8);
@@ -197,23 +257,19 @@ function parseDate(dateString) {
       const minute = cleanDate.substring(10, 12);
       const second = cleanDate.substring(12, 2) || '00';
       
-      // Create the date - treat as UTC to avoid timezone shifts
       const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
-      return new Date(dateStr);
-    } else if (cleanDate.length === 8) {
-      // All-day event (YYYYMMDD format)
-      const year = cleanDate.substring(0, 4);
-      const month = cleanDate.substring(4, 6);
-      const day = cleanDate.substring(6, 8);
-      
-      // Set to 9 AM for all-day events
-      return new Date(`${year}-${month}-${day}T09:00:00Z`);
+      const result = new Date(dateStr);
+      console.log('No-T format parsed as:', result);
+      return result;
     }
+    
+    console.log('Could not parse date format:', cleanDate);
+    return null;
+    
   } catch (error) {
     console.error('Date parsing error:', error, 'for date:', dateString);
+    return null;
   }
-  
-  return null;
 }
 
 function cleanText(text) {
