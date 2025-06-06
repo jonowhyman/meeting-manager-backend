@@ -106,7 +106,8 @@ export default async function handler(req, res) {
             start: parsedEvent.start,
             end: parsedEvent.end,
             dtstart: parsedEvent.dtstart,
-            dtend: parsedEvent.dtend
+            dtend: parsedEvent.dtend,
+            hasEndTime: !!parsedEvent.end
           });
           
           if (!modifiedInstances.has(parsedEvent.uid)) {
@@ -402,6 +403,7 @@ function expandRecurringEventWithExceptions(baseEvent, startRange, endRange, exc
         
         if (!alreadyIncluded) {
           console.log(`Adding standalone modified instance for ${modifiedDate.toISOString()}`);
+          console.log(`  Modified instance end time:`, modifiedInstance.end);
           const instance = {
             ...modifiedInstance,
             isRecurring: true,
@@ -411,6 +413,7 @@ function expandRecurringEventWithExceptions(baseEvent, startRange, endRange, exc
             isModified: true,
             isMovedInstance: true
           };
+          console.log(`  Final instance end time:`, instance.end);
           instances.push(instance);
         }
       }
