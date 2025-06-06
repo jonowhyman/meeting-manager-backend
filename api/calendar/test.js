@@ -1,6 +1,3 @@
-// File: /api/calendar/test.js
-// Backend endpoint to fetch and parse ICS calendar data
-
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -37,23 +34,24 @@ export default async function handler(req, res) {
 
       const icsData = await response.text();
       console.log('ICS data length:', icsData.length);
-      console.log('ICS preview:', icsData.substring(0, 200));
 
-      // Validate ICS format
-      if (!icsData.includes('BEGIN:VCALENDAR')) {
-        throw new Error('Invalid ICS format - no VCALENDAR found');
-      }
+      // Just return raw data first to test
+      return res.status(200).json({
+        success: true,
+        message: 'ICS fetch successful',
+        dataLength: icsData.length,
+        preview: icsData.substring(0, 500),
+        hasVCalendar: icsData.includes('BEGIN:VCALENDAR')
+      });
 
-      // Parse the ICS data
-      const events = parseICS(icsData);
-      console.log('Parsed events count:', events.length);
+    } catch (error) {
+      console.error('ICS fetch error:', error);
+      return res.status(500).json({ 
+        error: 'Failed to fetch calendar data',
+        details: error.message 
+      });
+    }
+  }
 
-      // Filter events by date range if provided
-      let filteredEvents = events;
-      if (dateRange?.start && dateRange?.end) {
-        const startDate = new Date(dateRange.start);
-        const endDate = new Date(dateRange.end);
-        
-        filteredEvents = events.filter(event => {
-          if (!event.start) return false;
-          return event.start >= startDate && event.start <=
+  return res.status(405).json({ error: 'Method not allowed' });
+}
