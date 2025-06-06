@@ -99,6 +99,16 @@ export default async function handler(req, res) {
       if (parsedEvent && parsedEvent.uid) {
         if (parsedEvent.recurrenceId) {
           // This is a modified instance of a recurring event
+          console.log(`🔄 MODIFIED INSTANCE FOUND:`, {
+            title: parsedEvent.summary,
+            uid: parsedEvent.uid,
+            recurrenceId: parsedEvent.recurrenceId,
+            start: parsedEvent.start,
+            end: parsedEvent.end,
+            dtstart: parsedEvent.dtstart,
+            dtend: parsedEvent.dtend
+          });
+          
           if (!modifiedInstances.has(parsedEvent.uid)) {
             modifiedInstances.set(parsedEvent.uid, new Map());
           }
@@ -585,8 +595,10 @@ function parseEvent(eventContent) {
     } else if (property.startsWith('RECURRENCE-ID')) {
       // This is a modified instance of a recurring event
       console.log('Found RECURRENCE-ID:', property, value);
-      event.recurrenceId = formatDateForComparison(parseDate(value, property));
+      const recurrenceDate = parseDate(value, property);
+      event.recurrenceId = formatDateForComparison(recurrenceDate);
       event.isModifiedInstance = true;
+      console.log(`  Parsed RECURRENCE-ID: ${value} -> ${recurrenceDate} -> ${event.recurrenceId}`);
     } else if (property.startsWith('EXDATE')) {
       // Exception dates (cancelled instances) - handle multiple formats
       console.log('Found EXDATE:', property, value);
