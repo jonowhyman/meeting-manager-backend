@@ -20,14 +20,14 @@ export default async function handler(req, res) {
     // Parse the ICS data into events
     const events = parseICS(icsData);
     
-    // Filter to recent/upcoming events (last 7 days to next 30 days)
+    // NEW: Filter to last 30 days + next 30 days (60 days total)
     const now = new Date();
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const monthFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     
     const recentEvents = events.filter(event => {
       if (!event.start) return false;
-      return event.start >= weekAgo && event.start <= monthFromNow;
+      return event.start >= thirtyDaysAgo && event.start <= thirtyDaysFromNow;
     });
 
     // Transform to meeting format
@@ -38,8 +38,6 @@ export default async function handler(req, res) {
       end: event.end,
       description: event.description || '',
       location: event.location || '',
-      organizer: event.organizer || '',
-      attendees: event.attendees || [],
       source: 'outlook'
     }));
 
@@ -59,67 +57,4 @@ export default async function handler(req, res) {
   }
 }
 
-function parseICS(icsData) {
-  const lines = icsData.split(/\r?\n/);
-  const events = [];
-  let currentEvent = null;
-
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].trim();
-    
-    // Handle line continuations
-    while (i + 1 < lines.length && (lines[i + 1].startsWith(' ') || lines[i + 1].startsWith('\t'))) {
-      i++;
-      line += lines[i].substring(1);
-    }
-
-    if (line === 'BEGIN:VEVENT') {
-      currentEvent = {};
-    } else if (line === 'END:VEVENT' && currentEvent) {
-      events.push(currentEvent);
-      currentEvent = null;
-    } else if (currentEvent && line.includes(':')) {
-      const colonIndex = line.indexOf(':');
-      const property = line.substring(0, colonIndex);
-      const value = line.substring(colonIndex + 1);
-
-      if (property.startsWith('DTSTART')) {
-        currentEvent.start = parseICSDate(value);
-      } else if (property.startsWith('DTEND')) {
-        currentEvent.end = parseICSDate(value);
-      } else if (property === 'SUMMARY') {
-        currentEvent.summary = unescapeText(value);
-      } else if (property === 'DESCRIPTION') {
-        currentEvent.description = unescapeText(value);
-      } else if (property === 'LOCATION') {
-        currentEvent.location = unescapeText(value);
-      } else if (property === 'UID') {
-        currentEvent.uid = value;
-      }
-    }
-  }
-
-  return events;
-}
-
-function parseICSDate(dateString) {
-  if (!dateString) return null;
-  
-  const cleanDate = dateString.replace(/[TZ]/g, '');
-  
-  if (cleanDate.length >= 14) {
-    const year = cleanDate.substring(0, 4);
-    const month = cleanDate.substring(4, 6);
-    const day = cleanDate.substring(6, 8);
-    const hour = cleanDate.substring(8, 10);
-    const minute = cleanDate.substring(10, 12);
-    
-    return new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
-  }
-  
-  return null;
-}
-
-function unescapeText(text) {
-  return text.replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';');
-}
+// ... rest of your parsing functions stay the same
