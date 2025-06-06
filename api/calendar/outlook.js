@@ -210,7 +210,23 @@ export default async function handler(req, res) {
       originalUid: event.originalUid || event.uid,
       rawDtstart: event.dtstart, // Keep for debugging
       rawDtend: event.dtend, // Keep for debugging
-      originalProperty: event.dtstartProperty // Keep for debugging
+      originalProperty: event.dtstartProperty, // Keep for debugging
+      
+      // DEBUG: Log each meeting as it's processed
+      debug: (() => {
+        if (event.summary && event.summary.includes('Power 15')) {
+          console.log(`🔍 PROCESSING POWER 15 MEETING:`, {
+            title: event.summary,
+            start: event.start,
+            end: event.end,
+            dtstart: event.dtstart,
+            dtend: event.dtend,
+            isModified: event.isModified,
+            isRecurring: event.isRecurring
+          });
+        }
+        return undefined;
+      })()
     }));
 
     console.log(`Processed ${meetings.length} meetings from ${events.length} total events`);
