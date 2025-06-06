@@ -352,7 +352,24 @@ function expandRecurringEventWithExceptions(baseEvent, startRange, endRange, exc
 }
 
 function formatDateForComparison(date) {
-  // Format date as YYYYMMDD for comparison with RECURRENCE-ID and EXDATE
+  // Format date as YYYYMMDD or YYYYMMDDTHHMMSS for comparison with RECURRENCE-ID and EXDATE
+  if (!date) return null;
+  
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  const second = String(date.getSeconds()).padStart(2, '0');
+  
+  // For comparison purposes, we'll use the full timestamp format
+  return `${year}${month}${day}T${hour}${minute}${second}`;
+}
+
+function formatDateForComparisonShort(date) {
+  // Format date as YYYYMMDD for basic date comparison
+  if (!date) return null;
+  
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
@@ -451,17 +468,36 @@ function parseEvent(eventContent) {
   const event = { attendees: [], organizer: '', isAllDay: false, isRecurring: false, exdates: [] };
   const lines = eventContent.split('\n');
   
+  // First pass: handle line continuations (lines that start with space or tab)
+  const consolidatedLines = [];
+  let currentLine = '';
+  
   for (let line of lines) {
     line = line.trim();
-    if (!line || !line.includes(':')) continue;
+    if (!line) continue;
     
-    // Handle multiline properties (lines that start with space or tab)
-    while (lines.indexOf(line) + 1 < lines.length && 
-           /^\s/.test(lines[lines.indexOf(line) + 1])) {
-      const nextLineIndex = lines.indexOf(line) + 1;
-      line += lines[nextLineIndex].trim();
-      lines.splice(nextLineIndex, 1);
+    // Check if this line is a continuation (starts with space or tab in original)
+    if (line.match(/^\s/) || (currentLine && !line.includes(':'))) {
+      // This is a continuation of the previous line
+      currentLine += line.replace(/^\s+/, ''); // Remove leading whitespace
+    } else {
+      // This is a new property line
+      if (currentLine) {
+        consolidatedLines.push(currentLine);
+      }
+      currentLine = line;
     }
+  }
+  
+  // Don't forget the last line
+  if (currentLine) {
+    consolidatedLines.push(currentLine);
+  }
+  
+  console.log(`Consolidated ${lines.length} raw lines into ${consolidatedLines.length} property lines`);
+  
+  for (let line of consolidatedLines) {
+    if (!line.includes(':')) continue;
     
     const colonIndex = line.indexOf(':');
     const property = line.substring(0, colonIndex);
@@ -488,10 +524,26 @@ function parseEvent(eventContent) {
       event.recurrenceId = formatDateForComparison(parseDate(value, property));
       event.isModifiedInstance = true;
     } else if (property.startsWith('EXDATE')) {
-      // Exception dates (cancelled instances)
+      // Exception dates (cancelled instances) - handle multiple formats
       console.log('Found EXDATE:', property, value);
-      const exceptionDates = value.split(',').map(dateStr => parseDate(dateStr.trim(), property)).filter(d => d);
-      event.exdates.push(...exceptionDates);
+      
+      // Split by comma to handle multiple dates in one EXDATE line
+      const dateStrings = value.split(',');
+      
+      for (let dateStr of dateStrings) {
+        dateStr = dateStr.trim();
+        if (dateStr) {
+          const parsedDate = parseDate(dateStr, property);
+          if (parsedDate) {
+            event.exdates.push(parsedDate);
+            console.log(`  Added exception date: ${parsedDate.toISOString()}`);
+          } else {
+            console.log(`  Failed to parse exception date: ${dateStr}`);
+          }
+        }
+      }
+      
+      console.log(`Total exception dates found: ${event.exdates.length}`);
     } else if (property === 'SUMMARY') {
       event.summary = cleanText(value);
     } else if (property === 'DESCRIPTION') {
