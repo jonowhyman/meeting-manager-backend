@@ -1,0 +1,17 @@
+{
+  "name": "meeting-manager-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Meeting Manager with Motion integration",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "vercel build",
+    "deploy": "vercel"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
