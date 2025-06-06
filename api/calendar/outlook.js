@@ -56,9 +56,11 @@ export default async function handler(req, res) {
     const icsData = await response.text();
     console.log('ICS data length:', icsData.length);
     
-    // Simple parsing
+    // Enhanced parsing with better filtering
     const events = [];
     const eventBlocks = icsData.split('BEGIN:VEVENT');
+    
+    console.log(`Found ${eventBlocks.length - 1} event blocks in ICS`);
     
     for (let i = 1; i < eventBlocks.length; i++) {
       const eventData = eventBlocks[i];
@@ -69,14 +71,23 @@ export default async function handler(req, res) {
       const event = parseEvent(eventContent);
       
       if (event && event.start) {
-        // Filter for events within 30 days range
+        // ENHANCED FILTERING: More generous time window
         const now = new Date();
-        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+        const twoMonthsAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000); // 60 days back
+        const threeMonthsFromNow = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days forward
         
-        if (event.start >= thirtyDaysAgo && event.start <= thirtyDaysFromNow) {
+        // For all-day events, check if they fall on relevant dates
+        const eventDate = new Date(event.start);
+        const isRelevant = eventDate >= twoMonthsAgo && eventDate <= threeMonthsFromNow;
+        
+        if (isRelevant) {
+          console.log(`Including event: "${event.summary}" on ${eventDate.toISOString()}`);
           events.push(event);
+        } else {
+          console.log(`Filtering out event: "${event.summary}" on ${eventDate.toISOString()} (outside range)`);
         }
+      } else {
+        console.log('Skipping event with invalid/missing start time');
       }
     }
     
@@ -92,10 +103,28 @@ export default async function handler(req, res) {
       location: event.location || '',
       attendees: event.attendees || [],
       organizer: event.organizer || '',
-      source: 'custom-ics'
+      source: 'custom-ics',
+      isAllDay: event.isAllDay || false,
+      isRecurring: event.isRecurring || false,
+      rawDtstart: event.dtstart, // Keep for debugging
+      originalProperty: event.dtstartProperty // Keep for debugging
     }));
 
     console.log(`Processed ${meetings.length} meetings from ${events.length} total events`);
+    
+    // Enhanced logging for debugging
+    const todayMeetings = meetings.filter(m => {
+      const today = new Date().toISOString().split('T')[0];
+      const meetingDate = new Date(m.start).toISOString().split('T')[0];
+      return meetingDate === today;
+    });
+    
+    const allDayMeetings = meetings.filter(m => m.isAllDay);
+    const recurringMeetings = meetings.filter(m => m.isRecurring);
+    
+    console.log(`Today's meetings: ${todayMeetings.length}`);
+    console.log(`All-day meetings: ${allDayMeetings.length}`);
+    console.log(`Recurring meetings: ${recurringMeetings.length}`);
 
     return res.status(200).json({
       success: true,
@@ -103,9 +132,14 @@ export default async function handler(req, res) {
       totalEvents: meetings.length,
       source: 'custom-ics',
       sourceUrl: icsUrl,
+      stats: {
+        todayMeetings: todayMeetings.length,
+        allDayMeetings: allDayMeetings.length,
+        recurringMeetings: recurringMeetings.length
+      },
       dateRange: {
-        from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-        to: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+        from: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+        to: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
       }
     });
 
@@ -120,7 +154,7 @@ export default async function handler(req, res) {
 }
 
 function parseEvent(eventContent) {
-  const event = { attendees: [], organizer: '' };
+  const event = { attendees: [], organizer: '', isAllDay: false, isRecurring: false };
   const lines = eventContent.split('\n');
   
   for (let line of lines) {
@@ -139,16 +173,21 @@ function parseEvent(eventContent) {
     const property = line.substring(0, colonIndex);
     const value = line.substring(colonIndex + 1);
     
-    console.log('Parsing property:', property, 'Value:', value);
-    
     if (property.startsWith('DTSTART')) {
       console.log('Found DTSTART:', property, value);
-      event.start = parseDate(value);
+      
+      // Check if it's an all-day event (no time component)
+      if (property.includes('VALUE=DATE') || (!value.includes('T') && value.length === 8)) {
+        event.isAllDay = true;
+        console.log('Detected all-day event');
+      }
+      
+      event.start = parseDate(value, property);
       event.dtstart = value; // Keep original for debugging
       event.dtstartProperty = property; // Keep property for debugging
     } else if (property.startsWith('DTEND')) {
       console.log('Found DTEND:', property, value);
-      event.end = parseDate(value);
+      event.end = parseDate(value, property);
     } else if (property === 'SUMMARY') {
       event.summary = cleanText(value);
     } else if (property === 'DESCRIPTION') {
@@ -157,6 +196,11 @@ function parseEvent(eventContent) {
       event.location = cleanText(value);
     } else if (property === 'UID') {
       event.uid = value;
+    } else if (property === 'RRULE') {
+      // Detect recurring events
+      event.isRecurring = true;
+      event.rrule = value;
+      console.log('Detected recurring event with RRULE:', value);
     } else if (property.startsWith('ORGANIZER')) {
       // Extract organizer info
       if (value.includes('CN=')) {
@@ -193,6 +237,8 @@ function parseEvent(eventContent) {
   console.log('Parsed event:', {
     summary: event.summary,
     start: event.start,
+    isAllDay: event.isAllDay,
+    isRecurring: event.isRecurring,
     dtstart: event.dtstart,
     dtstartProperty: event.dtstartProperty
   });
@@ -200,11 +246,11 @@ function parseEvent(eventContent) {
   return event;
 }
 
-function parseDate(dateString) {
+function parseDate(dateString, property = '') {
   if (!dateString) return null;
   
   try {
-    console.log('Parsing date:', dateString);
+    console.log('Parsing date:', dateString, 'with property:', property);
     
     // Handle different ICS date formats
     let cleanDate = dateString.trim();
@@ -215,52 +261,58 @@ function parseDate(dateString) {
       cleanDate = cleanDate.split(':').pop();
     }
     
-    // Remove timezone suffixes like +1000, -0500, Z
-    cleanDate = cleanDate.replace(/[+-]\d{4}$/, '').replace(/Z$/, '');
+    // Check if this is an all-day event
+    const isAllDay = property.includes('VALUE=DATE') || (!cleanDate.includes('T') && cleanDate.length === 8);
     
-    console.log('Cleaned date string:', cleanDate);
-    
-    if (cleanDate.length === 8) {
+    if (isAllDay) {
       // All-day event format: YYYYMMDD (e.g., 20250607)
+      // IMPORTANT: For all-day events, use local midnight instead of UTC 9 AM
       const year = cleanDate.substring(0, 4);
       const month = cleanDate.substring(4, 6);
       const day = cleanDate.substring(6, 8);
       
-      const result = new Date(`${year}-${month}-${day}T09:00:00Z`);
-      console.log('All-day event parsed as:', result);
+      // Use local time midnight for all-day events
+      const result = new Date(`${year}-${month}-${day}T00:00:00`);
+      console.log('All-day event parsed as local midnight:', result);
       return result;
       
-    } else if (cleanDate.length >= 14 && cleanDate.includes('T')) {
-      // Timed event format: YYYYMMDDTHHMMSS (e.g., 20250607T140000)
-      const datePart = cleanDate.substring(0, 8);
-      const timePart = cleanDate.substring(9);
+    } else {
+      // Remove timezone suffixes like +1000, -0500, Z for timed events
+      cleanDate = cleanDate.replace(/[+-]\d{4}$/, '').replace(/Z$/, '');
       
-      const year = datePart.substring(0, 4);
-      const month = datePart.substring(4, 6);
-      const day = datePart.substring(6, 8);
-      
-      const hour = timePart.substring(0, 2);
-      const minute = timePart.substring(2, 4);
-      const second = timePart.substring(4, 2) || '00';
-      
-      const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
-      const result = new Date(dateStr);
-      console.log('Timed event parsed as:', result);
-      return result;
-      
-    } else if (cleanDate.length >= 14) {
-      // Handle format without T separator: YYYYMMDDHHMMSS
-      const year = cleanDate.substring(0, 4);
-      const month = cleanDate.substring(4, 6);
-      const day = cleanDate.substring(6, 8);
-      const hour = cleanDate.substring(8, 10);
-      const minute = cleanDate.substring(10, 12);
-      const second = cleanDate.substring(12, 2) || '00';
-      
-      const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
-      const result = new Date(dateStr);
-      console.log('No-T format parsed as:', result);
-      return result;
+      if (cleanDate.length >= 14 && cleanDate.includes('T')) {
+        // Timed event format: YYYYMMDDTHHMMSS (e.g., 20250607T140000)
+        const datePart = cleanDate.substring(0, 8);
+        const timePart = cleanDate.substring(9);
+        
+        const year = datePart.substring(0, 4);
+        const month = datePart.substring(4, 6);
+        const day = datePart.substring(6, 8);
+        
+        const hour = timePart.substring(0, 2);
+        const minute = timePart.substring(2, 4);
+        const second = timePart.substring(4, 6) || '00';
+        
+        // For timed events, treat as local time (this may need timezone adjustment)
+        const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+        const result = new Date(dateStr);
+        console.log('Timed event parsed as local time:', result);
+        return result;
+        
+      } else if (cleanDate.length >= 14) {
+        // Handle format without T separator: YYYYMMDDHHMMSS
+        const year = cleanDate.substring(0, 4);
+        const month = cleanDate.substring(4, 6);
+        const day = cleanDate.substring(6, 8);
+        const hour = cleanDate.substring(8, 10);
+        const minute = cleanDate.substring(10, 12);
+        const second = cleanDate.substring(12, 14) || '00';
+        
+        const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+        const result = new Date(dateStr);
+        console.log('No-T format parsed as local time:', result);
+        return result;
+      }
     }
     
     console.log('Could not parse date format:', cleanDate);
