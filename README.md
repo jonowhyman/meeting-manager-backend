@@ -25,3 +25,4 @@ This is the backend API for the Meeting Manager app that handles Motion API inte
 ```bash
 npm install
 vercel dev
+<!-- Updated at 15:30 -->
