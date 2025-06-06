@@ -60,7 +60,8 @@ export default async function handler(req, res) {
     const events = [];
     const eventBlocks = icsData.split('BEGIN:VEVENT');
     
-    console.log(`Found ${eventBlocks.length - 1} event blocks in ICS`);
+    console.log(`\n🔍 PARSING ${eventBlocks.length - 1} event blocks from ICS data`);
+    console.log(`📊 ICS data length: ${icsData.length} characters`);
     
     // Define our date range for filtering - EXPAND THE RANGE
     const now = new Date();
@@ -71,6 +72,8 @@ export default async function handler(req, res) {
     const eventsByUID = new Map();
     const modifiedInstances = new Map(); // UID -> Map of RECURRENCE-ID -> event
     
+    console.log(`📅 Processing events between ${sixMonthsAgo.toISOString()} and ${sixMonthsFromNow.toISOString()}`);
+    
     for (let i = 1; i < eventBlocks.length; i++) {
       const eventData = eventBlocks[i];
       const endIndex = eventData.indexOf('END:VEVENT');
@@ -78,6 +81,20 @@ export default async function handler(req, res) {
       
       const eventContent = eventData.substring(0, endIndex);
       const parsedEvent = parseEvent(eventContent);
+      
+      // Debug every event that contains "travel" or "office" (case insensitive)
+      if (parsedEvent && parsedEvent.summary && 
+          (parsedEvent.summary.toLowerCase().includes('travel') || 
+           parsedEvent.summary.toLowerCase().includes('office'))) {
+        console.log(`\n🚗 FOUND TRAVEL/OFFICE EVENT #${i}:`);
+        console.log(`  Title: "${parsedEvent.summary}"`);
+        console.log(`  UID: ${parsedEvent.uid}`);
+        console.log(`  Start: ${parsedEvent.start}`);
+        console.log(`  Is Recurring: ${parsedEvent.isRecurring}`);
+        console.log(`  RRULE: ${parsedEvent.rrule}`);
+        console.log(`  Exception dates: ${parsedEvent.exdates?.length || 0}`);
+        console.log(`  Raw event content preview:`, eventContent.substring(0, 200) + '...');
+      }
       
       if (parsedEvent && parsedEvent.uid) {
         if (parsedEvent.recurrenceId) {
@@ -90,11 +107,26 @@ export default async function handler(req, res) {
         } else {
           // This is a base event (either single or recurring master)
           eventsByUID.set(parsedEvent.uid, parsedEvent);
+          
+          // Log all recurring events for debugging
+          if (parsedEvent.isRecurring) {
+            console.log(`📅 Added recurring event: "${parsedEvent.summary}" (${parsedEvent.uid})`);
+          }
+        }
+      } else {
+        console.log(`⚠️ Skipped event #${i} - missing UID or failed parsing`);
+        if (eventContent.toLowerCase().includes('travel') || eventContent.toLowerCase().includes('office')) {
+          console.log(`🚨 ALERT: Skipped event contains 'travel' or 'office'!`);
+          console.log(`Event content preview:`, eventContent.substring(0, 500));
         }
       }
     }
     
-    console.log(`Processed ${eventsByUID.size} base events and ${modifiedInstances.size} modified recurring series`);
+    console.log(`\n📊 PARSING SUMMARY:`);
+    console.log(`  Total event blocks found: ${eventBlocks.length - 1}`);
+    console.log(`  Base events parsed: ${eventsByUID.size}`);
+    console.log(`  Modified recurring instances: ${modifiedInstances.size}`);
+    console.log(`  Events with 'travel' or 'office' in title: ${Array.from(eventsByUID.values()).filter(e => e.summary && (e.summary.toLowerCase().includes('travel') || e.summary.toLowerCase().includes('office'))).length}`);
     
     // Second pass: process events with exception handling
     for (const [uid, baseEvent] of eventsByUID) {
@@ -496,12 +528,14 @@ function parseEvent(eventContent) {
   const consolidatedLines = [];
   let currentLine = '';
   
-  for (let line of lines) {
-    line = line.trim();
+  console.log(`🔄 Processing ${lines.length} raw lines from event content`);
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
     if (!line) continue;
     
     // Check if this line is a continuation (starts with space or tab in original)
-    if (line.match(/^\s/) || (currentLine && !line.includes(':'))) {
+    if (lines[i].match(/^\s/) || (currentLine && !line.includes(':'))) {
       // This is a continuation of the previous line
       currentLine += line.replace(/^\s+/, ''); // Remove leading whitespace
     } else {
@@ -518,7 +552,10 @@ function parseEvent(eventContent) {
     consolidatedLines.push(currentLine);
   }
   
-  console.log(`Consolidated ${lines.length} raw lines into ${consolidatedLines.length} property lines`);
+  console.log(`📝 Consolidated ${lines.length} raw lines into ${consolidatedLines.length} property lines`);
+  
+  // Log first few lines for debugging
+  console.log(`📋 First few consolidated lines:`, consolidatedLines.slice(0, 5));
   
   for (let line of consolidatedLines) {
     if (!line.includes(':')) continue;
