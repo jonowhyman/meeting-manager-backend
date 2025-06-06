@@ -25,13 +25,12 @@ export default async function handler(req, res) {
       });
     }
 
-    const taskData = {
-      name,
-      description: description || '',
-      priority: priority || 'MEDIUM',
-      durationMinutes: durationMinutes || 30,
-      workspaceId
-    };
+const taskData = {
+  name,
+  description: description || '',
+  priority: priority || 'MEDIUM',
+  workspaceId
+};
 
     console.log('Creating Motion task:', taskData);
 
