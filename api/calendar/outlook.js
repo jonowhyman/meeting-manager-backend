@@ -199,6 +199,7 @@ export default async function handler(req, res) {
       recurringInstanceDate: event.recurringInstanceDate || null,
       originalUid: event.originalUid || event.uid,
       rawDtstart: event.dtstart, // Keep for debugging
+      rawDtend: event.dtend, // Keep for debugging
       originalProperty: event.dtstartProperty // Keep for debugging
     }));
 
@@ -579,6 +580,8 @@ function parseEvent(eventContent) {
     } else if (property.startsWith('DTEND')) {
       console.log('Found DTEND:', property, value);
       event.end = parseDate(value, property);
+      event.dtend = value; // Keep original for debugging
+      event.dtendProperty = property; // Keep property for debugging
     } else if (property.startsWith('RECURRENCE-ID')) {
       // This is a modified instance of a recurring event
       console.log('Found RECURRENCE-ID:', property, value);
@@ -654,6 +657,7 @@ function parseEvent(eventContent) {
   console.log('Parsed event:', {
     summary: event.summary,
     start: event.start,
+    end: event.end,
     isAllDay: event.isAllDay,
     isRecurring: event.isRecurring,
     isModifiedInstance: event.isModifiedInstance,
@@ -661,7 +665,9 @@ function parseEvent(eventContent) {
     exdates: event.exdates.length,
     rrule: event.rrule,
     dtstart: event.dtstart,
-    dtstartProperty: event.dtstartProperty
+    dtend: event.dtend,
+    dtstartProperty: event.dtstartProperty,
+    dtendProperty: event.dtendProperty
   });
   
   return event;
