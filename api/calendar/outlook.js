@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     const icsData = await response.text();
     console.log('ICS data length:', icsData.length);
     
-    // Enhanced parsing with recurring event expansion
+    // Enhanced parsing with recurring event expansion and exception handling
     const events = [];
     const eventBlocks = icsData.split('BEGIN:VEVENT');
     
@@ -67,20 +67,55 @@ export default async function handler(req, res) {
     const twoMonthsAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000); // 60 days back
     const threeMonthsFromNow = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days forward
     
+    // First pass: collect all events and group by UID
+    const eventsByUID = new Map();
+    const modifiedInstances = new Map(); // UID -> Map of RECURRENCE-ID -> event
+    
     for (let i = 1; i < eventBlocks.length; i++) {
       const eventData = eventBlocks[i];
       const endIndex = eventData.indexOf('END:VEVENT');
       if (endIndex === -1) continue;
       
       const eventContent = eventData.substring(0, endIndex);
-      const baseEvent = parseEvent(eventContent);
+      const parsedEvent = parseEvent(eventContent);
       
-      if (baseEvent && baseEvent.start) {
+      if (parsedEvent && parsedEvent.uid) {
+        if (parsedEvent.recurrenceId) {
+          // This is a modified instance of a recurring event
+          if (!modifiedInstances.has(parsedEvent.uid)) {
+            modifiedInstances.set(parsedEvent.uid, new Map());
+          }
+          modifiedInstances.get(parsedEvent.uid).set(parsedEvent.recurrenceId, parsedEvent);
+          console.log(`Found modified instance for UID ${parsedEvent.uid} on ${parsedEvent.recurrenceId}`);
+        } else {
+          // This is a base event (either single or recurring master)
+          eventsByUID.set(parsedEvent.uid, parsedEvent);
+        }
+      }
+    }
+    
+    console.log(`Processed ${eventsByUID.size} base events and ${modifiedInstances.size} modified recurring series`);
+    
+    // Second pass: process events with exception handling
+    for (const [uid, baseEvent] of eventsByUID) {
+      if (baseEvent.start) {
         if (baseEvent.isRecurring && baseEvent.rrule) {
           // Expand recurring event into individual instances
-          console.log(`Expanding recurring event: "${baseEvent.summary}"`);
-          const recurringInstances = expandRecurringEvent(baseEvent, twoMonthsAgo, threeMonthsFromNow);
-          console.log(`Generated ${recurringInstances.length} instances for "${baseEvent.summary}"`);
+          console.log(`Expanding recurring event: "${baseEvent.summary}" (UID: ${uid})`);
+          
+          // Get exception dates and modified instances for this UID
+          const exceptionDates = baseEvent.exdates || [];
+          const modifiedInstancesForUID = modifiedInstances.get(uid) || new Map();
+          
+          const recurringInstances = expandRecurringEventWithExceptions(
+            baseEvent, 
+            twoMonthsAgo, 
+            threeMonthsFromNow,
+            exceptionDates,
+            modifiedInstancesForUID
+          );
+          
+          console.log(`Generated ${recurringInstances.length} instances for "${baseEvent.summary}" after applying exceptions`);
           events.push(...recurringInstances);
         } else {
           // Single event - check if it's in our date range
@@ -166,7 +201,7 @@ export default async function handler(req, res) {
   }
 }
 
-function expandRecurringEvent(baseEvent, startRange, endRange) {
+function expandRecurringEventWithExceptions(baseEvent, startRange, endRange, exceptionDates, modifiedInstances) {
   const instances = [];
   
   if (!baseEvent.rrule) {
@@ -177,6 +212,8 @@ function expandRecurringEvent(baseEvent, startRange, endRange) {
   try {
     const rrule = parseRRule(baseEvent.rrule);
     console.log('Parsed RRULE:', rrule);
+    console.log('Exception dates:', exceptionDates);
+    console.log('Modified instances:', Array.from(modifiedInstances.keys()));
     
     if (!rrule.freq) {
       console.log('No FREQ found in RRULE');
@@ -201,19 +238,49 @@ function expandRecurringEvent(baseEvent, startRange, endRange) {
     while (currentDate <= untilDate && instanceCount < maxInstances) {
       // Check if this instance falls within our date range
       if (currentDate >= startRange && currentDate <= endRange) {
-        // Create a new instance
-        const instance = {
-          ...baseEvent,
-          start: new Date(currentDate),
-          end: eventDuration > 0 ? new Date(currentDate.getTime() + eventDuration) : null,
-          isRecurring: true,
-          recurringInstanceDate: currentDate.toISOString(),
-          instanceId: `${currentDate.getFullYear()}${String(currentDate.getMonth() + 1).padStart(2, '0')}${String(currentDate.getDate()).padStart(2, '0')}`,
-          originalUid: baseEvent.uid
-        };
+        const currentDateStr = formatDateForComparison(currentDate);
         
-        instances.push(instance);
-        console.log(`Created instance for ${currentDate.toISOString()}`);
+        // Check if this instance is cancelled (in EXDATE)
+        const isCancelled = exceptionDates.some(exDate => {
+          const exDateStr = formatDateForComparison(exDate);
+          return exDateStr === currentDateStr;
+        });
+        
+        if (isCancelled) {
+          console.log(`Instance for ${currentDateStr} is cancelled (EXDATE)`);
+        } else {
+          // Check if this instance has been modified
+          const modifiedInstance = modifiedInstances.get(currentDateStr);
+          
+          if (modifiedInstance) {
+            console.log(`Using modified instance for ${currentDateStr}`);
+            // Use the modified instance instead of generating from base
+            const instance = {
+              ...modifiedInstance,
+              isRecurring: true,
+              recurringInstanceDate: currentDate.toISOString(),
+              instanceId: `${currentDate.getFullYear()}${String(currentDate.getMonth() + 1).padStart(2, '0')}${String(currentDate.getDate()).padStart(2, '0')}`,
+              originalUid: baseEvent.uid,
+              isModified: true
+            };
+            instances.push(instance);
+          } else {
+            // Create a regular instance from the base event
+            const instance = {
+              ...baseEvent,
+              start: new Date(currentDate),
+              end: eventDuration > 0 ? new Date(currentDate.getTime() + eventDuration) : null,
+              isRecurring: true,
+              recurringInstanceDate: currentDate.toISOString(),
+              instanceId: `${currentDate.getFullYear()}${String(currentDate.getMonth() + 1).padStart(2, '0')}${String(currentDate.getDate()).padStart(2, '0')}`,
+              originalUid: baseEvent.uid,
+              isModified: false
+            };
+            
+            instances.push(instance);
+            console.log(`Created regular instance for ${currentDate.toISOString()}`);
+          }
+        }
       }
       
       // Calculate next occurrence based on frequency
@@ -249,13 +316,53 @@ function expandRecurringEvent(baseEvent, startRange, endRange) {
       }
     }
     
-    console.log(`Generated ${instances.length} instances for recurring event`);
+    // Also add any modified instances that don't fall on regular recurrence dates
+    // (these are instances that were moved to completely different dates)
+    for (const [recurrenceId, modifiedInstance] of modifiedInstances) {
+      const modifiedDate = new Date(modifiedInstance.start);
+      if (modifiedDate >= startRange && modifiedDate <= endRange) {
+        // Check if we already included this (i.e., it's a time change but same date)
+        const alreadyIncluded = instances.some(inst => 
+          Math.abs(new Date(inst.start) - modifiedDate) < 1000 * 60 * 60 // within 1 hour
+        );
+        
+        if (!alreadyIncluded) {
+          console.log(`Adding standalone modified instance for ${modifiedDate.toISOString()}`);
+          const instance = {
+            ...modifiedInstance,
+            isRecurring: true,
+            recurringInstanceDate: modifiedDate.toISOString(),
+            instanceId: `mod-${Date.now()}`,
+            originalUid: baseEvent.uid,
+            isModified: true,
+            isMovedInstance: true
+          };
+          instances.push(instance);
+        }
+      }
+    }
+    
+    console.log(`Generated ${instances.length} instances for recurring event (${exceptionDates.length} cancelled, ${modifiedInstances.size} modified)`);
     return instances;
     
   } catch (error) {
-    console.error('Error expanding recurring event:', error);
+    console.error('Error expanding recurring event with exceptions:', error);
     return [baseEvent]; // Return original event if expansion fails
   }
+}
+
+function formatDateForComparison(date) {
+  // Format date as YYYYMMDD for comparison with RECURRENCE-ID and EXDATE
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}${month}${day}`;
+}
+
+function expandRecurringEvent(baseEvent, startRange, endRange) {
+  // This function is now replaced by expandRecurringEventWithExceptions
+  // Keeping for backward compatibility
+  return expandRecurringEventWithExceptions(baseEvent, startRange, endRange, [], new Map());
 }
 
 function parseRRule(rruleString) {
@@ -341,7 +448,7 @@ function getNextWeeklyOccurrence(currentDate, byday, interval) {
 }
 
 function parseEvent(eventContent) {
-  const event = { attendees: [], organizer: '', isAllDay: false, isRecurring: false };
+  const event = { attendees: [], organizer: '', isAllDay: false, isRecurring: false, exdates: [] };
   const lines = eventContent.split('\n');
   
   for (let line of lines) {
@@ -375,6 +482,16 @@ function parseEvent(eventContent) {
     } else if (property.startsWith('DTEND')) {
       console.log('Found DTEND:', property, value);
       event.end = parseDate(value, property);
+    } else if (property.startsWith('RECURRENCE-ID')) {
+      // This is a modified instance of a recurring event
+      console.log('Found RECURRENCE-ID:', property, value);
+      event.recurrenceId = formatDateForComparison(parseDate(value, property));
+      event.isModifiedInstance = true;
+    } else if (property.startsWith('EXDATE')) {
+      // Exception dates (cancelled instances)
+      console.log('Found EXDATE:', property, value);
+      const exceptionDates = value.split(',').map(dateStr => parseDate(dateStr.trim(), property)).filter(d => d);
+      event.exdates.push(...exceptionDates);
     } else if (property === 'SUMMARY') {
       event.summary = cleanText(value);
     } else if (property === 'DESCRIPTION') {
@@ -426,6 +543,9 @@ function parseEvent(eventContent) {
     start: event.start,
     isAllDay: event.isAllDay,
     isRecurring: event.isRecurring,
+    isModifiedInstance: event.isModifiedInstance,
+    recurrenceId: event.recurrenceId,
+    exdates: event.exdates.length,
     rrule: event.rrule,
     dtstart: event.dtstart,
     dtstartProperty: event.dtstartProperty
