@@ -55,6 +55,8 @@ export default async function handler(req, res) {
       end: event.end,
       description: event.description || '',
       location: event.location || '',
+      attendees: event.attendees || [], // Now includes attendees!
+      organizer: event.organizer || '',
       source: 'outlook'
     }));
 
@@ -77,11 +79,30 @@ export default async function handler(req, res) {
 }
 
 function parseEvent(eventContent) {
-  const event = {};
+  const event = {
+    attendees: [],
+    organizer: ''
+  };
+  
+  // Handle line continuations first
   const lines = eventContent.split('\n');
+  const processedLines = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
+    
+    // Handle line continuations (lines starting with space or tab)
+    while (i + 1 < lines.length && (lines[i + 1].startsWith(' ') || lines[i + 1].startsWith('\t'))) {
+      i++;
+      line += lines[i].substring(1); // Remove the leading space/tab
+    }
+    
+    if (line) {
+      processedLines.push(line);
+    }
+  }
 
-  for (let line of lines) {
-    line = line.trim();
+  for (let line of processedLines) {
     if (!line || !line.includes(':')) continue;
 
     const colonIndex = line.indexOf(':');
@@ -100,10 +121,69 @@ function parseEvent(eventContent) {
       event.location = cleanText(value);
     } else if (property === 'UID') {
       event.uid = value;
+    } else if (property.startsWith('ATTENDEE')) {
+      // Parse attendee information
+      const attendee = parseAttendee(line);
+      if (attendee) {
+        event.attendees.push(attendee);
+      }
+    } else if (property.startsWith('ORGANIZER')) {
+      // Parse organizer information
+      event.organizer = parseOrganizer(line);
     }
   }
 
   return event;
+}
+
+function parseAttendee(line) {
+  try {
+    // Extract email from ATTENDEE line
+    // Format: ATTENDEE;CN=Name;RSVP=TRUE:mailto:email@domain.com
+    const emailMatch = line.match(/mailto:([^;?\s]+)/i);
+    const nameMatch = line.match(/CN=([^;]+)/i);
+    
+    if (emailMatch) {
+      const email = emailMatch[1];
+      const name = nameMatch ? cleanText(nameMatch[1]) : email.split('@')[0];
+      
+      return {
+        name: name,
+        email: email,
+        status: getAttendeeStatus(line)
+      };
+    }
+  } catch (error) {
+    console.error('Error parsing attendee:', error);
+  }
+  
+  return null;
+}
+
+function parseOrganizer(line) {
+  try {
+    // Extract organizer info
+    // Format: ORGANIZER;CN=Name:mailto:email@domain.com
+    const emailMatch = line.match(/mailto:([^;?\s]+)/i);
+    const nameMatch = line.match(/CN=([^;]+)/i);
+    
+    if (emailMatch) {
+      const email = emailMatch[1];
+      const name = nameMatch ? cleanText(nameMatch[1]) : email.split('@')[0];
+      return `${name} <${email}>`;
+    }
+  } catch (error) {
+    console.error('Error parsing organizer:', error);
+  }
+  
+  return '';
+}
+
+function getAttendeeStatus(line) {
+  if (line.includes('PARTSTAT=ACCEPTED')) return 'accepted';
+  if (line.includes('PARTSTAT=DECLINED')) return 'declined';
+  if (line.includes('PARTSTAT=TENTATIVE')) return 'tentative';
+  return 'pending';
 }
 
 function parseDate(dateString) {
@@ -134,5 +214,6 @@ function cleanText(text) {
     .replace(/\\n/g, '\n')
     .replace(/\\,/g, ',')
     .replace(/\\;/g, ';')
-    .replace(/\\t/g, '\t');
+    .replace(/\\t/g, '\t')
+    .replace(/"/g, ''); // Remove quotes
 }
