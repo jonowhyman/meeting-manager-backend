@@ -8,37 +8,31 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  if (req.method === 'POST') {
-    try {
-      const { icsUrl } = req.body;
+  try {
+    // HARDCODED: Your specific ICS URL
+    const icsUrl = "https://outlook.office365.com/owa/calendar/9c463b80649a40c28918f07f03562595@sxswsydney.com/2ca3e48f938e4b41bb0c939fd98314804887869706492204640/calendar.ics";
 
-      if (!icsUrl) {
-        return res.status(400).json({ error: 'ICS URL is required' });
-      }
+    console.log('Fetching ICS from:', icsUrl);
 
-      // Fetch the ICS file
-      const response = await fetch(icsUrl);
+    const response = await fetch(icsUrl);
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const icsData = await response.text();
-
-      return res.status(200).json({
-        success: true,
-        message: 'ICS fetch successful',
-        dataLength: icsData.length,
-        preview: icsData.substring(0, 500)
-      });
-
-    } catch (error) {
-      return res.status(500).json({ 
-        error: 'Failed to fetch calendar data',
-        details: error.message 
-      });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-  }
 
-  return res.status(405).json({ error: 'Method not allowed' });
+    const icsData = await response.text();
+
+    return res.status(200).json({
+      success: true,
+      message: 'ICS fetch successful',
+      dataLength: icsData.length,
+      preview: icsData.substring(0, 500)
+    });
+
+  } catch (error) {
+    return res.status(500).json({ 
+      error: 'Failed to fetch calendar data',
+      details: error.message 
+    });
+  }
 }
