@@ -62,10 +62,10 @@ export default async function handler(req, res) {
     
     console.log(`Found ${eventBlocks.length - 1} event blocks in ICS`);
     
-    // Define our date range for filtering
+    // Define our date range for filtering - EXPAND THE RANGE
     const now = new Date();
-    const twoMonthsAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000); // 60 days back
-    const threeMonthsFromNow = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days forward
+    const sixMonthsAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000); // 6 months back
+    const sixMonthsFromNow = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000); // 6 months forward
     
     // First pass: collect all events and group by UID
     const eventsByUID = new Map();
@@ -109,8 +109,8 @@ export default async function handler(req, res) {
           
           const recurringInstances = expandRecurringEventWithExceptions(
             baseEvent, 
-            twoMonthsAgo, 
-            threeMonthsFromNow,
+            sixMonthsAgo, 
+            sixMonthsFromNow,
             exceptionDates,
             modifiedInstancesForUID
           );
@@ -120,7 +120,7 @@ export default async function handler(req, res) {
         } else {
           // Single event - check if it's in our date range
           const eventDate = new Date(baseEvent.start);
-          const isRelevant = eventDate >= twoMonthsAgo && eventDate <= threeMonthsFromNow;
+          const isRelevant = eventDate >= sixMonthsAgo && eventDate <= sixMonthsFromNow;
           
           if (isRelevant) {
             console.log(`Including single event: "${baseEvent.summary}" on ${eventDate.toISOString()}`);
@@ -186,8 +186,8 @@ export default async function handler(req, res) {
         recurringInstances: recurringInstances.length
       },
       dateRange: {
-        from: twoMonthsAgo.toISOString(),
-        to: threeMonthsFromNow.toISOString()
+        from: sixMonthsAgo.toISOString(),
+        to: sixMonthsFromNow.toISOString()
       }
     });
 
@@ -443,25 +443,34 @@ function getNextWeeklyOccurrence(currentDate, byday, interval) {
   const currentDay = currentDate.getDay();
   const nextDate = new Date(currentDate);
   
-  // Find the next occurrence
-  let found = false;
-  
-  // First, check if there's a target day later in the current week
-  for (const targetDay of targetDays) {
+  // Special handling for multiple days in the same week (Mon-Fri pattern)
+  if (targetDays.length > 1) {
+    // Find the next day in the current week first
+    for (const targetDay of targetDays) {
+      if (targetDay > currentDay) {
+        nextDate.setDate(nextDate.getDate() + (targetDay - currentDay));
+        console.log(`Next day in current week: ${nextDate.toDateString()}`);
+        return nextDate;
+      }
+    }
+    
+    // If no more days in current week, go to the first day of next interval
+    const weeksToAdd = interval;
+    const daysToAdd = (7 - currentDay) + (7 * (weeksToAdd - 1)) + targetDays[0];
+    nextDate.setDate(nextDate.getDate() + daysToAdd);
+    console.log(`First day of next ${interval}-week interval: ${nextDate.toDateString()}`);
+    return nextDate;
+  } else {
+    // Single day pattern - original logic
+    const targetDay = targetDays[0];
     if (targetDay > currentDay) {
       nextDate.setDate(nextDate.getDate() + (targetDay - currentDay));
-      found = true;
-      break;
+    } else {
+      const daysToNextWeek = 7 - currentDay + (7 * (interval - 1));
+      nextDate.setDate(nextDate.getDate() + daysToNextWeek + targetDay);
     }
+    return nextDate;
   }
-  
-  // If no day found in current week, go to next interval and find first target day
-  if (!found) {
-    const daysToNextWeek = 7 - currentDay + (7 * (interval - 1));
-    nextDate.setDate(nextDate.getDate() + daysToNextWeek + targetDays[0]);
-  }
-  
-  return nextDate;
 }
 
 function parseEvent(eventContent) {
@@ -671,6 +680,16 @@ function parseDate(dateString, property = '') {
         const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}`;
         const result = new Date(dateStr);
         console.log('No-T format parsed as local time:', result);
+        return result;
+      } else if (cleanDate.length === 8) {
+        // Handle YYYYMMDD format without time (treat as midnight)
+        const year = cleanDate.substring(0, 4);
+        const month = cleanDate.substring(4, 6);
+        const day = cleanDate.substring(6, 8);
+        
+        const dateStr = `${year}-${month}-${day}T00:00:00`;
+        const result = new Date(dateStr);
+        console.log('Date-only format parsed as local midnight:', result);
         return result;
       }
     }
