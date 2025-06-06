@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -9,21 +8,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Your ICS URL
     const icsUrl = "https://outlook.office365.com/owa/calendar/9c463b80649a40c28918f07f03562595@sxswsydney.com/2ca3e48f938e4b41bb0c939fd98314804887869706492204640/calendar.ics";
 
-    console.log('Fetching ICS from:', icsUrl);
-
     const response = await fetch(icsUrl);
-
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
     const icsData = await response.text();
-    console.log('ICS data length:', icsData.length);
+    
+    // DEBUG: Log a sample event to see what data is actually available
+    const firstEventMatch = icsData.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/);
+    if (firstEventMatch) {
+      console.log('=== SAMPLE EVENT DATA ===');
+      console.log(firstEventMatch[0]);
+      console.log('=== END SAMPLE ===');
+    }
 
-    // Simple parsing - split by events
+    // Simple parsing
     const events = [];
     const eventBlocks = icsData.split('BEGIN:VEVENT');
     
@@ -36,7 +38,6 @@ export default async function handler(req, res) {
       const event = parseEvent(eventContent);
       
       if (event && event.start) {
-        // Filter to last 30 days + next 30 days
         const now = new Date();
         const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
         const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -47,7 +48,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Transform to meeting format
     const meetings = events.map((event, index) => ({
       id: `outlook-${event.uid || index}`,
       title: event.summary || 'Untitled Event',
@@ -55,18 +55,31 @@ export default async function handler(req, res) {
       end: event.end,
       description: event.description || '',
       location: event.location || '',
-      attendees: event.attendees || [], // Now includes attendees!
+      attendees: event.attendees || [],
       organizer: event.organizer || '',
-      source: 'outlook'
+      source: 'outlook',
+      // DEBUG: Include raw event data
+      debugInfo: {
+        hasAttendees: (event.attendees || []).length > 0,
+        hasOrganizer: !!event.organizer,
+        rawFields: Object.keys(event)
+      }
     }));
 
-    console.log(`Parsed ${meetings.length} meetings`);
+    // DEBUG: Log summary
+    console.log(`Total events parsed: ${events.length}`);
+    console.log(`Events with attendees: ${events.filter(e => e.attendees && e.attendees.length > 0).length}`);
+    console.log(`Events with organizer: ${events.filter(e => e.organizer).length}`);
 
     return res.status(200).json({
       success: true,
       meetings,
       totalEvents: meetings.length,
-      source: 'outlook-ics'
+      source: 'outlook-ics',
+      debug: {
+        hasAttendeeData: meetings.some(m => m.attendees.length > 0),
+        sampleEventFields: meetings[0] ? Object.keys(meetings[0]) : []
+      }
     });
 
   } catch (error) {
@@ -79,35 +92,21 @@ export default async function handler(req, res) {
 }
 
 function parseEvent(eventContent) {
-  const event = {
-    attendees: [],
-    organizer: ''
-  };
-  
-  // Handle line continuations first
+  const event = { attendees: [], organizer: '' };
   const lines = eventContent.split('\n');
-  const processedLines = [];
   
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].trim();
-    
-    // Handle line continuations (lines starting with space or tab)
-    while (i + 1 < lines.length && (lines[i + 1].startsWith(' ') || lines[i + 1].startsWith('\t'))) {
-      i++;
-      line += lines[i].substring(1); // Remove the leading space/tab
-    }
-    
-    if (line) {
-      processedLines.push(line);
-    }
-  }
+  // Track what fields we find
+  const foundFields = [];
 
-  for (let line of processedLines) {
+  for (let line of lines) {
+    line = line.trim();
     if (!line || !line.includes(':')) continue;
 
     const colonIndex = line.indexOf(':');
     const property = line.substring(0, colonIndex);
     const value = line.substring(colonIndex + 1);
+
+    foundFields.push(property);
 
     if (property.startsWith('DTSTART')) {
       event.start = parseDate(value);
@@ -122,48 +121,40 @@ function parseEvent(eventContent) {
     } else if (property === 'UID') {
       event.uid = value;
     } else if (property.startsWith('ATTENDEE')) {
-      // Parse attendee information
       const attendee = parseAttendee(line);
       if (attendee) {
         event.attendees.push(attendee);
       }
     } else if (property.startsWith('ORGANIZER')) {
-      // Parse organizer information
       event.organizer = parseOrganizer(line);
     }
   }
 
+  // DEBUG: Log fields found for first few events
+  event._debugFields = foundFields;
+
   return event;
 }
 
+// ... rest of parsing functions stay the same
 function parseAttendee(line) {
   try {
-    // Extract email from ATTENDEE line
-    // Format: ATTENDEE;CN=Name;RSVP=TRUE:mailto:email@domain.com
     const emailMatch = line.match(/mailto:([^;?\s]+)/i);
     const nameMatch = line.match(/CN=([^;]+)/i);
     
     if (emailMatch) {
       const email = emailMatch[1];
       const name = nameMatch ? cleanText(nameMatch[1]) : email.split('@')[0];
-      
-      return {
-        name: name,
-        email: email,
-        status: getAttendeeStatus(line)
-      };
+      return { name, email };
     }
   } catch (error) {
     console.error('Error parsing attendee:', error);
   }
-  
   return null;
 }
 
 function parseOrganizer(line) {
   try {
-    // Extract organizer info
-    // Format: ORGANIZER;CN=Name:mailto:email@domain.com
     const emailMatch = line.match(/mailto:([^;?\s]+)/i);
     const nameMatch = line.match(/CN=([^;]+)/i);
     
@@ -175,22 +166,13 @@ function parseOrganizer(line) {
   } catch (error) {
     console.error('Error parsing organizer:', error);
   }
-  
   return '';
-}
-
-function getAttendeeStatus(line) {
-  if (line.includes('PARTSTAT=ACCEPTED')) return 'accepted';
-  if (line.includes('PARTSTAT=DECLINED')) return 'declined';
-  if (line.includes('PARTSTAT=TENTATIVE')) return 'tentative';
-  return 'pending';
 }
 
 function parseDate(dateString) {
   if (!dateString) return null;
   
   try {
-    // Remove timezone info and clean the date
     const cleanDate = dateString.replace(/[TZ]/g, '').replace(/\+.*$/, '');
     
     if (cleanDate.length >= 14) {
@@ -215,5 +197,5 @@ function cleanText(text) {
     .replace(/\\,/g, ',')
     .replace(/\\;/g, ';')
     .replace(/\\t/g, '\t')
-    .replace(/"/g, ''); // Remove quotes
+    .replace(/"/g, '');
 }
