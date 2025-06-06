@@ -1,0 +1,19 @@
+json{
+  "name": "meeting-manager-backend",
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
+  ],
+  "env": {
+    "MOTION_API_KEY": "l47aDyIRyaRY1fXIOsFZmCjMzP3+4mnhO8UU13EGpok="
+  }
+}
