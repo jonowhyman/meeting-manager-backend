@@ -2,10 +2,11 @@
 // Vercel API endpoint for Claude AI meeting summaries
 
 export default async function handler(req, res) {
-    // Set CORS headers
+    // Set CORS headers - more permissive
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Max-Age', '86400');
     
     // Handle preflight OPTIONS request
     if (req.method === 'OPTIONS') {
@@ -66,7 +67,7 @@ Please provide a well-structured summary that could be shared with stakeholders 
                 'anthropic-version': '2023-06-01'
             },
             body: JSON.stringify({
-                model: 'claude-3-sonnet-20240229',
+                model: 'claude-3-5-sonnet-20241022',
                 max_tokens: 1000,
                 messages: [{
                     role: 'user',
