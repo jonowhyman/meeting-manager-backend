@@ -43,20 +43,8 @@ export default async function handler(req, res) {
             });
         }
         
-        // Create the prompt for Claude
-        const prompt = `Please analyze these meeting notes and create a concise, professional summary. Focus on:
-- Key topics discussed
-- Important decisions made
-- Action items and next steps
-- Any deadlines or commitments
-
-Meeting Title: ${title || 'N/A'}
-Meeting Description: ${description || 'N/A'}
-
-Meeting Notes:
-${notes}
-
-Please provide a well-structured summary that could be shared with stakeholders or used for follow-up communications.`;
+        // Create the prompt for Claude - UPDATED: Use enhanced prompt from frontend
+        const prompt = notes; // The frontend now sends the complete enhanced prompt
 
         // Call Claude API
         const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
