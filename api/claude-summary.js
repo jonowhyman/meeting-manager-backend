@@ -43,8 +43,8 @@ export default async function handler(req, res) {
             });
         }
         
-        // Create the prompt for Claude - UPDATED: Use enhanced prompt from frontend
-        const prompt = notes; // The frontend now sends the complete enhanced prompt
+        // Use the prompt exactly as sent from frontend (enhanced prompt)
+        const prompt = notes;
 
         // Call Claude API
         const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
@@ -57,6 +57,7 @@ export default async function handler(req, res) {
             body: JSON.stringify({
                 model: 'claude-3-5-sonnet-20241022',
                 max_tokens: 1000,
+                system: "You are a meeting notes formatter. Follow formatting instructions exactly. Do not be conversational or ask questions. Output only the requested formatted summary.",
                 messages: [{
                     role: 'user',
                     content: prompt
