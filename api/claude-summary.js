@@ -1,94 +1,125 @@
- // /api/claude-summary.js
+// api/claude-summary.js
+// Vercel API endpoint for Claude AI meeting summaries
+
 export default async function handler(req, res) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  try {
-    const { notes, title, description, apiKey } = req.body;
-
-    if (!apiKey) {
-      return res.status(400).json({ error: 'API key is required' });
+    // Set CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    // Handle preflight OPTIONS request
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
     }
-
-    if (!notes || notes.trim().length === 0) {
-      return res.status(400).json({ error: 'Meeting notes are required' });
+    
+    // Only allow POST requests
+    if (req.method !== 'POST') {
+        return res.status(405).json({ 
+            error: 'Method not allowed. This endpoint only accepts POST requests.' 
+        });
     }
+    
+    try {
+        const { notes, title, description, apiKey } = req.body;
+        
+        // Validate required fields
+        if (!notes || !apiKey) {
+            return res.status(400).json({ 
+                error: 'Missing required fields: notes and apiKey are required' 
+            });
+        }
+        
+        if (!notes.trim()) {
+            return res.status(400).json({ 
+                error: 'Notes cannot be empty' 
+            });
+        }
+        
+        // Validate API key format
+        if (!apiKey.startsWith('sk-ant-')) {
+            return res.status(400).json({ 
+                error: 'Invalid API key format. Claude API keys start with sk-ant-' 
+            });
+        }
+        
+        // Create the prompt for Claude
+        const prompt = `Please analyze these meeting notes and create a concise, professional summary. Focus on:
+- Key topics discussed
+- Important decisions made
+- Action items and next steps
+- Any deadlines or commitments
 
-    // Clean the notes for Claude (remove formatting markup)
-    const cleanNotes = notes
-      .replace(/\[RED\]|\[\/RED\]|\[BLUE\]|\[\/BLUE\]|\[GREEN\]|\[\/GREEN\]|\[ORANGE\]|\[\/ORANGE\]|\[PURPLE\]|\[\/PURPLE\]/g, '')
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/\*(.*?)\*/g, '$1')
-      .replace(/__(.*?)__/g, '$1');
+Meeting Title: ${title || 'N/A'}
+Meeting Description: ${description || 'N/A'}
 
-    const prompt = `Please analyze these meeting notes and create a concise, professional summary. Focus on:
+Meeting Notes:
+${notes}
 
-**Meeting:** ${title}
-${description ? `**Description:** ${description}` : ''}
+Please provide a well-structured summary that could be shared with stakeholders or used for follow-up communications.`;
 
-**My Notes:**
-${cleanNotes}
-
-Please provide a structured summary with:
-• **Key Topics Discussed:** Main themes and subjects covered
-• **Important Decisions:** Any decisions made or conclusions reached  
-• **Action Items:** Tasks, follow-ups, or next steps identified
-• **Key Outcomes:** Results, agreements, or deliverables
-
-Keep the summary professional, concise, and actionable. Focus on the most important information that would be useful for future reference.`;
-
-    // Call Claude API from server (no CORS issues)
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 1000,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('Claude API Error:', response.status, errorData);
-      return res.status(response.status).json({ 
-        error: `Claude API Error: ${response.status} - ${errorData.error?.message || response.statusText}` 
-      });
+        // Call Claude API
+        const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+                model: 'claude-3-sonnet-20240229',
+                max_tokens: 1000,
+                messages: [{
+                    role: 'user',
+                    content: prompt
+                }]
+            })
+        });
+        
+        // Check if Claude API call was successful
+        if (!claudeResponse.ok) {
+            const errorData = await claudeResponse.text();
+            console.error('Claude API Error:', claudeResponse.status, errorData);
+            
+            // Handle specific error types
+            if (claudeResponse.status === 401) {
+                return res.status(401).json({ 
+                    error: 'Invalid API key. Please check your Claude API key.' 
+                });
+            } else if (claudeResponse.status === 429) {
+                return res.status(429).json({ 
+                    error: 'Rate limit exceeded. Please try again later.' 
+                });
+            } else {
+                return res.status(claudeResponse.status).json({ 
+                    error: `Claude API error: ${claudeResponse.status} ${claudeResponse.statusText}` 
+                });
+            }
+        }
+        
+        const claudeData = await claudeResponse.json();
+        
+        // Extract the summary from Claude's response
+        const summary = claudeData.content?.[0]?.text || 'No summary generated';
+        
+        // Return the summary
+        return res.status(200).json({ 
+            summary: summary,
+            timestamp: new Date().toISOString(),
+            success: true
+        });
+        
+    } catch (error) {
+        console.error('API Error:', error);
+        
+        // Handle different types of errors
+        if (error.code === 'ENOTFOUND' || error.message.includes('fetch')) {
+            return res.status(503).json({ 
+                error: 'Unable to connect to Claude API. Please check your internet connection.' 
+            });
+        }
+        
+        return res.status(500).json({ 
+            error: 'Internal server error: ' + error.message 
+        });
     }
-
-    const data = await response.json();
-    const aiSummary = data.content[0].text;
-
-    return res.status(200).json({ 
-      summary: aiSummary,
-      generatedAt: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('API Error:', error);
-    return res.status(500).json({ 
-      error: `Server error: ${error.message}` 
-    });
-  }
 }
