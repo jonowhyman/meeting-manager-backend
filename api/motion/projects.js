@@ -7,7 +7,6 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Handle GET request (for browser testing)
   if (req.method === 'GET') {
     return res.status(200).json({
       message: "Motion Projects API - Send POST request with workspaceId",
@@ -23,29 +22,15 @@ export default async function handler(req, res) {
   const API_KEY = process.env.MOTION_API_KEY || 'l47aDyIRyaRY1fXIOsFZmCjMzP3+4mnhO8UU13EGpok=';
 
   try {
-    // Parse request body safely
-    let workspaceId;
-    try {
-      const body = req.body;
-      workspaceId = body?.workspaceId;
-    } catch (parseError) {
-      return res.status(400).json({ error: 'Invalid JSON in request body' });
-    }
+    const { workspaceId } = req.body;
     
     if (!workspaceId) {
-      return res.status(400).json({ 
-        error: 'Workspace ID required', 
-        received: req.body 
-      });
+      return res.status(400).json({ error: 'Workspace ID required' });
     }
 
     console.log('Fetching projects for workspace:', workspaceId);
 
-    // Fetch projects from Motion API
-    const motionUrl = `https://api.usemotion.com/v1/projects?workspaceId=${workspaceId}`;
-    console.log('Motion API URL:', motionUrl);
-
-    const response = await fetch(motionUrl, {
+    const response = await fetch(`https://api.usemotion.com/v1/projects?workspaceId=${workspaceId}`, {
       method: 'GET',
       headers: {
         'X-API-Key': API_KEY,
@@ -53,32 +38,54 @@ export default async function handler(req, res) {
       }
     });
 
-    console.log('Motion API response status:', response.status);
-
     if (!response.ok) {
       const errorText = await response.text();
       console.error('Motion Projects Error:', response.status, errorText);
       return res.status(response.status).json({ 
         error: `Motion API Error: ${response.status}`,
-        details: errorText,
-        url: motionUrl
+        details: errorText 
       });
     }
 
-    const projects = await response.json();
-    console.log('Projects received:', Array.isArray(projects) ? projects.length : 'not array');
+    const motionResponse = await response.json();
+    console.log('Raw Motion API response:', JSON.stringify(motionResponse, null, 2));
+    
+    // Extract projects array from Motion's response format
+    let projects = [];
+    
+    if (Array.isArray(motionResponse)) {
+      // Direct array response
+      projects = motionResponse;
+    } else if (motionResponse && motionResponse.projects && Array.isArray(motionResponse.projects)) {
+      // Wrapped in { projects: [...] }
+      projects = motionResponse.projects;
+    } else if (motionResponse && motionResponse.data && Array.isArray(motionResponse.data)) {
+      // Wrapped in { data: [...] }
+      projects = motionResponse.data;
+    } else if (motionResponse && typeof motionResponse === 'object') {
+      // Try to find any array property
+      const keys = Object.keys(motionResponse);
+      for (const key of keys) {
+        if (Array.isArray(motionResponse[key])) {
+          projects = motionResponse[key];
+          console.log(`Found projects array in key: ${key}`);
+          break;
+        }
+      }
+    }
+    
+    console.log('Extracted projects count:', projects.length);
     
     return res.status(200).json({ 
       success: true, 
-      projects: projects || []
+      projects: projects
     });
 
   } catch (error) {
     console.error('Server Error:', error);
     return res.status(500).json({ 
       error: 'Internal server error',
-      details: error.message,
-      stack: error.stack
+      details: error.message 
     });
   }
 }
