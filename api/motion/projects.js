@@ -7,42 +7,78 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Handle GET request (for browser testing) - return example data
+  // Handle GET request (for browser testing)
   if (req.method === 'GET') {
     return res.status(200).json({
-      message: "Motion Projects API - Send POST request with { workspaceId: 'your-workspace-id' }",
-      example_response: {
-        success: true,
-        projects: [
-          {
-            id: "example-project-1",
-            name: "Website Redesign",
-            description: "Redesign company website"
-          },
-          {
-            id: "example-project-2", 
-            name: "Mobile App Development",
-            description: "Build iOS and Android app"
-          }
-        ]
-      },
-      usage: "POST with workspaceId in body"
+      message: "Motion Projects API - Send POST request with workspaceId",
+      usage: "POST with { workspaceId: 'workspace-id' } in body",
+      status: "API is working"
     });
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Method not allowed - use POST' });
   }
 
   const API_KEY = process.env.MOTION_API_KEY || 'l47aDyIRyaRY1fXIOsFZmCjMzP3+4mnhO8UU13EGpok=';
 
   try {
-    const { workspaceId } = req.body;
+    // Parse request body safely
+    let workspaceId;
+    try {
+      const body = req.body;
+      workspaceId = body?.workspaceId;
+    } catch (parseError) {
+      return res.status(400).json({ error: 'Invalid JSON in request body' });
+    }
     
     if (!workspaceId) {
-      return res.status(400).json({ error: 'Workspace ID required' });
+      return res.status(400).json({ 
+        error: 'Workspace ID required', 
+        received: req.body 
+      });
     }
 
     console.log('Fetching projects for workspace:', workspaceId);
 
-    const response = await fetch(`https://api.usemotion.com/v
+    // Fetch projects from Motion API
+    const motionUrl = `https://api.usemotion.com/v1/projects?workspaceId=${workspaceId}`;
+    console.log('Motion API URL:', motionUrl);
+
+    const response = await fetch(motionUrl, {
+      method: 'GET',
+      headers: {
+        'X-API-Key': API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    console.log('Motion API response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Motion Projects Error:', response.status, errorText);
+      return res.status(response.status).json({ 
+        error: `Motion API Error: ${response.status}`,
+        details: errorText,
+        url: motionUrl
+      });
+    }
+
+    const projects = await response.json();
+    console.log('Projects received:', Array.isArray(projects) ? projects.length : 'not array');
+    
+    return res.status(200).json({ 
+      success: true, 
+      projects: projects || []
+    });
+
+  } catch (error) {
+    console.error('Server Error:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message,
+      stack: error.stack
+    });
+  }
+}
