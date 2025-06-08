@@ -13,8 +13,32 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
+  // Handle GET request (for browser testing) - return example data
+  if (req.method === 'GET') {
+    return res.status(200).json({
+      message: "Motion Projects API - Send POST request with { workspaceId: 'your-workspace-id' }",
+      example_response: {
+        success: true,
+        projects: [
+          {
+            id: "example-project-1",
+            name: "Website Redesign",
+            description: "Redesign company website"
+          },
+          {
+            id: "example-project-2", 
+            name: "Mobile App Development",
+            description: "Build iOS and Android app"
+          }
+        ]
+      },
+      required_env_vars: ["MOTION_API_KEY"],
+      usage: "POST with workspaceId in body"
+    });
+  }
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: 'Method not allowed - use POST with workspaceId' });
   }
 
   try {
